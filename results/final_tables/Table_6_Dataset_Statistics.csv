@@ -1,0 +1,3 @@
+Dataset,Sessions,Purchase_Rate,session_click_count_Mean,session_click_count_Median,session_click_count_Std,session_duration_seconds_Mean,session_duration_seconds_Median,session_duration_seconds_Std,unique_items_or_pages_Mean,unique_items_or_pages_Median,unique_items_or_pages_Std
+UCI,12330,0.1547,34.5502,20.0,46.5141,1310.0372,680.0,2037.8017,31.7315,18.0,44.4755
+YOOCHOOSE,9249729,0.0551,3.4868,2.0,3.0412,0.3732,0.0,0.7709,2.8219,2.0,2.425

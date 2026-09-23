@@ -1,0 +1,2 @@
+model,precision,recall,f1_score,roc_auc,training_time_seconds,prediction_time_seconds,n_estimators,max_depth,learning_rate,scale_pos_weight,feature_count,decision_threshold,threshold_selection
+XGBoost,0.18557336621454995,0.3644067796610169,0.24591503267973855,0.7476176838470057,2.3014883999712765,0.04504970001289621,300,6,0.05,17.148820326678766,14,0.6400000000000001,validation_F1

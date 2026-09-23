@@ -1,0 +1,2 @@
+﻿model,precision,recall,f1_score,roc_auc,training_time_seconds,prediction_time_seconds,epochs,batch_size,gru_units,embedding_dim,attention
+GRU_Attention,0.10855349202197227,0.5024213075060533,0.17853301785330178,0.6860090825509724,139.14972930000295,2.107170600000245,4,64,32,32,Keras Attention

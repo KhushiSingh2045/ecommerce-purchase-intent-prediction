@@ -1,0 +1,2 @@
+model,precision,recall,f1_score,roc_auc,training_time_seconds,prediction_time_seconds,epochs,batch_size,gru_units
+GRU,0.0979020979020979,0.5254237288135594,0.16505038980794828,0.6666870093623662,102.2011203999864,1.543657100002747,4,64,32

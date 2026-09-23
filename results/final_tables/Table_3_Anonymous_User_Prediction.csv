@@ -1,0 +1,6 @@
+Model,Anonymous_Sessions,Predicted_Purchase,Predicted_No_Purchase,Mean_Purchase_Probability,Predicted_Purchase_Rate,Prediction_Time_Seconds
+LSTM,15000,4318,10682,0.3234,0.2879,8.2143
+GRU,15000,3917,11083,0.3391,0.2611,5.2688
+GRU + Attention,15000,3823,11177,0.3268,0.2549,5.27
+XGBoost,15000,3353,11647,0.3487,0.2235,0.24
+LightGBM,15000,3706,11294,0.366,0.2471,0.2465

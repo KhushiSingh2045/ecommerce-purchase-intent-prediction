@@ -1,0 +1,4 @@
+model,feature_type,model_only_mean_ms,model_only_median_ms,model_only_p95_ms,model_only_p99_ms,end_to_end_mean_ms,end_to_end_median_ms,end_to_end_p95_ms,end_to_end_p99_ms
+XGBoost,Aggregated,6.273,5.366,9.669,12.486,6.559,5.984,8.514,10.327
+LightGBM,Aggregated,1.989,1.751,3.479,3.824,3.915,3.375,6.155,12.95
+Logistic Regression,Aggregated,1.279,0.839,2.82,3.026,2.647,1.951,5.068,6.347

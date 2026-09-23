@@ -1,0 +1,4 @@
+Feature,UCI_Mean,YOOCHOOSE_Mean,UCI_Median,YOOCHOOSE_Median,UCI_Std,YOOCHOOSE_Std,Mean_Difference_Percent,Standardized_Mean_Difference,Drift_Interpretation,KS_Statistic,KS_P_Value,Statistical_Conclusion
+session_click_count,34.55020275750203,3.486845290278234,20.0,2.0,46.51405266174205,3.0412234621404046,-89.9078876186302,0.9424382470698968,Very large drift,0.6990927718161419,0.0,Significant distribution difference
+session_duration_seconds,1310.0372284358857,0.37321125840551655,680.0,0.0,2037.8017024563392,0.7708691429104707,-99.97151140056904,0.9088933827524023,Very large drift,0.9383805099650373,0.0,Significant distribution difference
+unique_items_or_pages,31.731467964314678,2.821869375848741,18.0,2.0,44.47550330493652,2.42501256262856,-91.10703173574501,0.9178919894483513,Very large drift,0.714534202626165,0.0,Significant distribution difference

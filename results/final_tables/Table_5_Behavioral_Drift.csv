@@ -1,0 +1,4 @@
+Feature,UCI_Mean,YOOCHOOSE_Mean,UCI_Median,YOOCHOOSE_Median,Mean_Difference_Percent,Standardized_Mean_Difference,Drift_Interpretation,KS_Statistic,KS_P_Value
+session_click_count,34.5502,3.4868,20.0,2.0,-89.91,0.9424,Very large drift,0.6991,<0.001
+session_duration_seconds,1310.0372,0.3732,680.0,0.0,-99.97,0.9089,Very large drift,0.9384,<0.001
+unique_items_or_pages,31.7315,2.8219,18.0,2.0,-91.11,0.9179,Very large drift,0.7145,<0.001

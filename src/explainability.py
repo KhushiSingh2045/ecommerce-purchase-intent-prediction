@@ -32,3 +32,4 @@ if __name__ == "__main__":
     plt.savefig(OUTPUT_PATH, bbox_inches="tight")
     plt.close()
     print(f"Saved -> {OUTPUT_PATH}")
+    

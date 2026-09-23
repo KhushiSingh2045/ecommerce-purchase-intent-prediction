@@ -1,0 +1,2 @@
+Hypothesis,Test,Feature,UCI_No_Purchase,UCI_Purchase,YOOCHOOSE_No_Purchase,YOOCHOOSE_Purchase,Chi2_Statistic,Degrees_of_Freedom,P_Value,Alpha,Significant,Phi_Effect_Size,Conclusion
+H4,Chi-square test of independence,purchase,10422,1908,8740033,509696,2340.744687793495,1,0.0,0.05,True,0.015897295669939006,Reject H0: purchase rate differs significantly

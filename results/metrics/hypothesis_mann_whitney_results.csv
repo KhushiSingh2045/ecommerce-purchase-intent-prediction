@@ -1,0 +1,4 @@
+Hypothesis,Test,Feature,UCI_N,YOOCHOOSE_N,U_Statistic,P_Value,Alpha,Significant,Rank_Biserial_Effect,Effect_Interpretation,Conclusion
+H_1,Mann-Whitney U,session_click_count,12330,9249729,102026980700.0,0.0,0.05,True,0.7891755095655328,Large,Reject H0: significant distribution difference
+H_2,Mann-Whitney U,session_duration_seconds,12330,9249729,109815370617.0,0.0,0.05,True,0.9257550339505323,Large,Reject H0: significant distribution difference
+H_3,Mann-Whitney U,unique_items_or_pages,12330,9249729,102993461685.0,0.0,0.05,True,0.8061240078643046,Large,Reject H0: significant distribution difference

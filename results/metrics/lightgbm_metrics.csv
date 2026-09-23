@@ -1,0 +1,2 @@
+model,precision,recall,f1_score,roc_auc,training_time_seconds,prediction_time_seconds,n_estimators,max_depth,learning_rate,num_leaves,scale_pos_weight,feature_count
+LightGBM,0.137536578877361,0.62590799031477,0.22551799345692475,0.752119925273264,1.1031752999988385,0.1062859000012395,300,6,0.05,31,17.148820326678766,14

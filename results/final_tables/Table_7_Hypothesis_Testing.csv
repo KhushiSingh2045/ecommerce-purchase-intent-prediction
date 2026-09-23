@@ -1,0 +1,5 @@
+Hypothesis,Feature,Statistical_Test,Test_Statistic,P_Value,Effect_Size,Effect_Interpretation,Significant,Conclusion
+H_1,session_click_count,Mann-Whitney U,102026980700.0,<0.001,0.7892,Large,True,Reject H0: significant distribution difference
+H_2,session_duration_seconds,Mann-Whitney U,109815370617.0,<0.001,0.9258,Large,True,Reject H0: significant distribution difference
+H_3,unique_items_or_pages,Mann-Whitney U,102993461685.0,<0.001,0.8061,Large,True,Reject H0: significant distribution difference
+H4,purchase rate,Chi-square test of independence,2340.7447,<0.001,0.0159,Phi coefficient,True,Reject H0: purchase rate differs significantly

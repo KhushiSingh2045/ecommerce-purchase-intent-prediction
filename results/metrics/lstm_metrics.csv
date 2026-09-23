@@ -1,0 +1,2 @@
+model,precision,recall,f1_score,roc_auc,training_time_seconds,prediction_time_seconds,epochs,batch_size,lstm_units
+LSTM,0.093562,0.489104,0.157076,0.635229,139.25,1.59,5,64,32
