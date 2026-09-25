@@ -1,18 +1,16 @@
-import time
 from pathlib import Path
-
+import time
 import numpy as np
 import pandas as pd
-import tensorflow as tf
-
 from sklearn.metrics import (
+    classification_report,
+    confusion_matrix,
+    f1_score,
     precision_score,
     recall_score,
-    f1_score,
     roc_auc_score,
-    confusion_matrix,
-    classification_report
 )
+import tensorflow as tf
 
 # ============================================================
 # CONFIGURATION
@@ -26,7 +24,7 @@ GRU_UNITS = 32
 EMBEDDING_DIM = 32
 PATIENCE = 2
 
-DATA_PATH = Path("data/processed/yoochoose_dl_subset.npz")
+DATA_FILE = Path("data/processed/yoochoose_balanced_train.npz")
 
 MODEL_PATH = Path("models/deep_learning/gru_model.keras")
 METRICS_PATH = Path("results/metrics/gru_metrics.csv")
@@ -50,12 +48,19 @@ tf.config.threading.set_inter_op_parallelism_threads(2)
 # ============================================================
 
 print("=" * 60)
-print("GRU PURCHASE-INTENT MODEL")
+print("GRU PURCHASE-INTENT MODEL (BALANCED TRAINING SET)")
 print("=" * 60)
 
-print("\nLoading dataset...")
+print(f"\nLoading dataset from: {DATA_FILE}")
 
-data = np.load(DATA_PATH, allow_pickle=True)
+if not DATA_FILE.exists():
+    raise FileNotFoundError(
+        f"\nDataset not found:\n{DATA_FILE}\n\n"
+        "Ensure you have generated the balanced dataset first using:\n"
+        "python -m src.balance_dataset"
+    )
+
+data = np.load(DATA_FILE, allow_pickle=True)
 
 print("\nAvailable dataset arrays:")
 print(data.files)
@@ -72,43 +77,17 @@ def find_array(possible_names):
     return None
 
 
-X_train = find_array([
-    "X_train",
-    "train_sequences",
-    "sequences_train"
-])
+X_train = find_array(["train_sequences", "X_train", "sequences_train"])
+X_val = find_array(
+    ["val_sequences", "X_val", "X_validation", "validation_sequences"]
+)
+X_test = find_array(["test_sequences", "X_test", "sequences_test"])
 
-X_val = find_array([
-    "X_val",
-    "X_validation",
-    "val_sequences",
-    "validation_sequences"
-])
-
-X_test = find_array([
-    "X_test",
-    "test_sequences",
-    "sequences_test"
-])
-
-y_train = find_array([
-    "y_train",
-    "train_labels",
-    "labels_train"
-])
-
-y_val = find_array([
-    "y_val",
-    "y_validation",
-    "val_labels",
-    "validation_labels"
-])
-
-y_test = find_array([
-    "y_test",
-    "test_labels",
-    "labels_test"
-])
+y_train = find_array(["train_labels", "y_train", "labels_train"])
+y_val = find_array(
+    ["val_labels", "y_val", "y_validation", "validation_labels"]
+)
+y_test = find_array(["test_labels", "y_test", "labels_test"])
 
 
 # ============================================================
@@ -116,19 +95,11 @@ y_test = find_array([
 # ============================================================
 
 if X_train is None or X_val is None or X_test is None:
-
     print("\nSaved train/validation/test arrays were not found.")
     print("Recreating the same 70/15/15 stratified split...")
 
-    X = find_array([
-        "sequences",
-        "X"
-    ])
-
-    y = find_array([
-        "labels",
-        "y"
-    ])
+    X = find_array(["sequences", "X"])
+    y = find_array(["labels", "y"])
 
     if X is None or y is None:
         raise ValueError(
@@ -138,23 +109,15 @@ if X_train is None or X_val is None or X_test is None:
     from sklearn.model_selection import train_test_split
 
     X_train, X_temp, y_train, y_temp = train_test_split(
-        X,
-        y,
-        test_size=0.30,
-        stratify=y,
-        random_state=RANDOM_SEED
+        X, y, test_size=0.30, stratify=y, random_state=RANDOM_SEED
     )
 
     X_val, X_test, y_val, y_test = train_test_split(
-        X_temp,
-        y_temp,
-        test_size=0.50,
-        stratify=y_temp,
-        random_state=RANDOM_SEED
+        X_temp, y_temp, test_size=0.50, stratify=y_temp, random_state=RANDOM_SEED
     )
 
 
-# Convert labels to integer arrays
+# Convert labels and sequences to integer arrays
 y_train = np.asarray(y_train).astype(np.int32)
 y_val = np.asarray(y_val).astype(np.int32)
 y_test = np.asarray(y_test).astype(np.int32)
@@ -208,20 +171,6 @@ print(
     f"Test       -> Purchase: {test_positive:,}, "
     f"No Purchase: {test_negative:,}"
 )
-
-
-# ============================================================
-# CLASS WEIGHTS
-# ============================================================
-
-class_weight = {
-    0: 1.0,
-    1: train_negative / train_positive
-}
-
-print("\nClass weights:")
-print(f"Class 0: {class_weight[0]:.4f}")
-print(f"Class 1: {class_weight[1]:.4f}")
 
 
 # ============================================================
@@ -285,22 +234,21 @@ early_stopping = tf.keras.callbacks.EarlyStopping(
 # ============================================================
 
 print("\n" + "=" * 60)
-print("TRAINING GRU")
+print("TRAINING GRU (BALANCED TRAINING SET)")
 print("=" * 60)
 
 start_time = time.perf_counter()
 
+# Balanced training set: class_weight is omitted
 history = model.fit(
     X_train,
     y_train,
     validation_data=(X_val, y_val),
     epochs=EPOCHS,
     batch_size=BATCH_SIZE,
-    class_weight=class_weight,
     callbacks=[early_stopping],
     verbose=1
 )
-
 training_time = time.perf_counter() - start_time
 
 print(f"\nTraining time: {training_time:.2f} seconds")
@@ -312,7 +260,7 @@ print(f"Epochs completed: {len(history.history['loss'])}")
 # ============================================================
 
 print("\n" + "=" * 60)
-print("TESTING GRU")
+print("TESTING GRU ON ORIGINAL TEST DISTRIBUTION")
 print("=" * 60)
 
 prediction_start = time.perf_counter()
@@ -451,7 +399,7 @@ try:
 
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
-    plt.title("GRU Training and Validation Loss")
+    plt.title("GRU Training and Validation Loss (Balanced Training Set)")
     plt.legend()
     plt.tight_layout()
 

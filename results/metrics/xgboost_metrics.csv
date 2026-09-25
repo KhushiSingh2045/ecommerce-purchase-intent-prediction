@@ -1,2 +1,2 @@
-model,precision,recall,f1_score,roc_auc,training_time_seconds,prediction_time_seconds,n_estimators,max_depth,learning_rate,scale_pos_weight,feature_count,decision_threshold,threshold_selection
-XGBoost,0.18557336621454995,0.3644067796610169,0.24591503267973855,0.7476176838470057,2.3014883999712765,0.04504970001289621,300,6,0.05,17.148820326678766,14,0.6400000000000001,validation_F1
+model,precision,recall,f1_score,roc_auc,pr_auc,training_time_seconds,prediction_time_seconds,n_estimators,max_depth,learning_rate,scale_pos_weight,feature_count,decision_threshold,threshold_selection
+XGBoost,0.18581907090464547,0.36803874092009686,0.2469536961819659,0.7459320872272015,0.17253087214586013,4.411195099935867,0.04582290002144873,300,6,0.05,1.0,14,0.6400000000000001,validation_F1

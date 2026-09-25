@@ -2,7 +2,7 @@ file,rows,columns,missing_values,infinite_values,duplicate_rows,status
 lstm_metrics.csv,1,10,0,0,0,OK
 gru_metrics.csv,1,10,0,0,0,OK
 gru_attention_metrics.csv,1,12,0,0,0,OK
-xgboost_metrics.csv,1,12,0,0,0,OK
+xgboost_metrics.csv,1,14,0,0,0,OK
 lightgbm_metrics.csv,1,13,0,0,0,OK
 early_prediction_metrics.csv,25,7,0,0,0,OK
 anonymous_user_prediction.csv,5,7,0,0,0,OK
@@ -22,4 +22,6 @@ realtime_event_latency.csv,100,7,0,0,0,OK
 realtime_latency.csv,3,10,0,0,0,OK
 realtime_session_predictions.csv,10000,7,0,0,0,OK
 realtime_simulation_metrics.csv,5,9,0,0,0,OK
-step17_csv_validation_report.csv,24,7,0,0,0,OK
+step17_csv_validation_report.csv,26,7,0,0,0,OK
+xgboost_metrics_threshold_comparison.csv,2,8,0,0,0,OK
+xgboost_validation_threshold_search.csv,90,2,0,0,0,OK

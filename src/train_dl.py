@@ -1,24 +1,21 @@
 import os
-import time
 import random
+import time
 import numpy as np
-import tensorflow as tf
-
 from sklearn.metrics import (
+    classification_report,
+    confusion_matrix,
+    f1_score,
     precision_score,
     recall_score,
-    f1_score,
     roc_auc_score,
-    confusion_matrix,
-    classification_report
 )
-
+import tensorflow as tf
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
-
-DATA_FILE = "data/processed/yoochoose_dl_subset.npz"
+DATA_FILE = "data/processed/yoochoose_balanced_train.npz"
 
 MODEL_DIR = "models/deep_learning"
 RESULTS_DIR = "results/metrics"
@@ -72,7 +69,7 @@ os.makedirs(FIGURES_DIR, exist_ok=True)
 # ============================================================
 
 print("=" * 60)
-print("YOOCHOOSE LSTM TRAINING")
+print("YOOCHOOSE LSTM TRAINING (BALANCED TRAINING SET)")
 print("=" * 60)
 
 print("\nLoading dataset:")
@@ -87,7 +84,7 @@ if not os.path.exists(DATA_FILE):
     raise FileNotFoundError(
         f"\nDataset not found:\n{DATA_FILE}\n\n"
         "Run this command first:\n"
-        "python -m src.prepare_dl_dataset"
+        "python -m src.balance_dataset"
     )
 
 data = np.load(DATA_FILE)
@@ -98,14 +95,12 @@ required_keys = [
     "val_sequences",
     "val_labels",
     "test_sequences",
-    "test_labels"
+    "test_labels",
 ]
 
 for key in required_keys:
     if key not in data:
-        raise KeyError(
-            f"Required dataset field '{key}' is missing."
-        )
+        raise KeyError(f"Required dataset field '{key}' is missing.")
 
 
 # ============================================================
@@ -161,13 +156,9 @@ print(
 # DETERMINE VOCABULARY SIZE
 # ============================================================
 
-vocab_size = int(
-    max(
-        np.max(X_train),
-        np.max(X_val),
-        np.max(X_test)
-    )
-) + 1
+vocab_size = (
+    int(max(np.max(X_train), np.max(X_val), np.max(X_test))) + 1
+)
 
 sequence_length = X_train.shape[1]
 
@@ -181,30 +172,6 @@ print(f"Maximum epochs  : {EPOCHS}")
 
 
 # ============================================================
-# HANDLE CLASS IMBALANCE
-# ============================================================
-
-negative_count = np.sum(y_train == 0)
-positive_count = np.sum(y_train == 1)
-
-if positive_count == 0:
-    raise ValueError("Training dataset contains no positive samples.")
-
-# Balanced class weights.
-# The model does not change the dataset itself;
-# the loss function gives more importance to the minority class.
-
-class_weight = {
-    0: 1.0,
-    1: negative_count / positive_count
-}
-
-print("\nClass weights:")
-print(f"Class 0: {class_weight[0]:.4f}")
-print(f"Class 1: {class_weight[1]:.4f}")
-
-
-# ============================================================
 # BUILD LSTM MODEL
 # ============================================================
 
@@ -213,28 +180,15 @@ print("Building LSTM model...")
 print("-" * 60)
 
 model = tf.keras.Sequential([
-    tf.keras.layers.Input(
-        shape=(sequence_length,)
-    ),
-
+    tf.keras.layers.Input(shape=(sequence_length,)),
     tf.keras.layers.Embedding(
         input_dim=vocab_size,
         output_dim=EMBEDDING_DIM,
-        mask_zero=True
+        mask_zero=True,
     ),
-
-    tf.keras.layers.LSTM(
-        LSTM_UNITS
-    ),
-
-    tf.keras.layers.Dropout(
-        0.30
-    ),
-
-    tf.keras.layers.Dense(
-        1,
-        activation="sigmoid"
-    )
+    tf.keras.layers.LSTM(LSTM_UNITS),
+    tf.keras.layers.Dropout(0.30),
+    tf.keras.layers.Dense(1, activation="sigmoid"),
 ])
 
 
@@ -243,14 +197,12 @@ model = tf.keras.Sequential([
 # ============================================================
 
 model.compile(
-    optimizer=tf.keras.optimizers.Adam(
-        learning_rate=0.001
-    ),
+    optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
     loss="binary_crossentropy",
     metrics=[
         tf.keras.metrics.Precision(name="precision"),
-        tf.keras.metrics.Recall(name="recall")
-    ]
+        tf.keras.metrics.Recall(name="recall"),
+    ],
 )
 
 print("\nModel summary:")
@@ -262,9 +214,7 @@ model.summary()
 # ============================================================
 
 early_stopping = tf.keras.callbacks.EarlyStopping(
-    monitor="val_loss",
-    patience=PATIENCE,
-    restore_best_weights=True
+    monitor="val_loss", patience=PATIENCE, restore_best_weights=True
 )
 
 
@@ -278,15 +228,15 @@ print("=" * 60)
 
 start_time = time.time()
 
+# Balanced training set: class_weight is no longer used
 history = model.fit(
     X_train,
     y_train,
     validation_data=(X_val, y_val),
     epochs=EPOCHS,
     batch_size=BATCH_SIZE,
-    class_weight=class_weight,
     callbacks=[early_stopping],
-    verbose=1
+    verbose=1,
 )
 
 training_time = time.time() - start_time
@@ -295,13 +245,8 @@ print("\n" + "=" * 60)
 print("TRAINING COMPLETED")
 print("=" * 60)
 
-print(
-    f"\nTraining time: {training_time / 60:.2f} minutes"
-)
-
-print(
-    f"Epochs completed: {len(history.history['loss'])}"
-)
+print(f"\nTraining time: {training_time / 60:.2f} minutes")
+print(f"Epochs completed: {len(history.history['loss'])}")
 
 
 # ============================================================
@@ -313,49 +258,23 @@ print("\nGenerating test predictions...")
 prediction_start = time.time()
 
 y_probability = model.predict(
-    X_test,
-    batch_size=BATCH_SIZE,
-    verbose=0
+    X_test, batch_size=BATCH_SIZE, verbose=0
 ).ravel()
 
 prediction_time = time.time() - prediction_start
 
-y_prediction = (
-    y_probability >= 0.50
-).astype(np.int8)
+y_prediction = (y_probability >= 0.50).astype(np.int8)
 
 
 # ============================================================
 # EVALUATION
 # ============================================================
 
-precision = precision_score(
-    y_test,
-    y_prediction,
-    zero_division=0
-)
-
-recall = recall_score(
-    y_test,
-    y_prediction,
-    zero_division=0
-)
-
-f1 = f1_score(
-    y_test,
-    y_prediction,
-    zero_division=0
-)
-
-roc_auc = roc_auc_score(
-    y_test,
-    y_probability
-)
-
-cm = confusion_matrix(
-    y_test,
-    y_prediction
-)
+precision = precision_score(y_test, y_prediction, zero_division=0)
+recall = recall_score(y_test, y_prediction, zero_division=0)
+f1 = f1_score(y_test, y_prediction, zero_division=0)
+roc_auc = roc_auc_score(y_test, y_probability)
+cm = confusion_matrix(y_test, y_prediction)
 
 
 # ============================================================
@@ -379,11 +298,8 @@ print(
     classification_report(
         y_test,
         y_prediction,
-        target_names=[
-            "No Purchase",
-            "Purchase"
-        ],
-        zero_division=0
+        target_names=["No Purchase", "Purchase"],
+        zero_division=0,
     )
 )
 
@@ -435,27 +351,16 @@ try:
 
     plt.figure(figsize=(8, 5))
 
-    plt.plot(
-        history.history["loss"],
-        label="Training Loss"
-    )
-
-    plt.plot(
-        history.history["val_loss"],
-        label="Validation Loss"
-    )
+    plt.plot(history.history["loss"], label="Training Loss")
+    plt.plot(history.history["val_loss"], label="Validation Loss")
 
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
-    plt.title("LSTM Training and Validation Loss")
+    plt.title("LSTM Training and Validation Loss (Balanced Training Set)")
     plt.legend()
     plt.tight_layout()
 
-    plt.savefig(
-        HISTORY_FILE,
-        dpi=150
-    )
-
+    plt.savefig(HISTORY_FILE, dpi=150)
     plt.close()
 
     print("\nSaved training figure:")

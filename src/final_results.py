@@ -426,7 +426,7 @@ def create_overall_summary(
 def main():
 
     print("=" * 80)
-    print("STEP 17 - PUBLICATION-READY RESULT TABLE GENERATION")
+   
     print("=" * 80)
 
     print("\nNo models will be trained.")
