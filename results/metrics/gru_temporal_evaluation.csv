@@ -1,0 +1,2 @@
+model,selected_threshold,validation_precision,validation_recall,validation_f1,test_precision,test_recall,test_f1,test_roc_auc,test_pr_auc,test_tn,test_fp,test_fn,test_tp,validation_prediction_time_seconds,test_prediction_time_seconds
+GRU,0.6000000000000002,0.18587209517124173,0.3601236918583843,0.24519216710691763,0.2023686920700309,0.29562764456981666,0.2402659432195942,0.7365750678251981,0.16046586470495933,1226271,86744,52437,22008,82.10132859999976,82.50080290000005

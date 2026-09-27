@@ -29,7 +29,7 @@ WARMUP_SESSIONS = 100
 # Kept for compatibility/documentation
 BATCH_SIZE = 64
 
-DATA_PATH = "data/processed/yoochoose_dl_subset.npz"
+DATA_PATH = "data/processed/yoochoose_balanced_train.npz"
 
 LSTM_MODEL_PATH = "models/deep_learning/lstm_model.keras"
 GRU_MODEL_PATH = "models/deep_learning/gru_model.keras"

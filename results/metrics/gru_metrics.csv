@@ -1,2 +1,2 @@
-model,precision,recall,f1_score,roc_auc,training_time_seconds,prediction_time_seconds,epochs,batch_size,gru_units
-GRU,0.11893095768374165,0.32324455205811137,0.17388472810159558,0.5960043130500856,154.43288210011087,1.41674450004939,3,64,32
+model,evaluation_split,threshold,precision,recall,f1_score,roc_auc,pr_auc,training_time_seconds,prediction_time_seconds,epochs,batch_size,gru_units,embedding_dim
+GRU,temporal_test,0.5,0.15572246563275147,0.4511652898112701,0.23153069313755903,0.7365750651857417,0.1604659011895319,417.45111139991786,60.40213190007489,3,64,32,32

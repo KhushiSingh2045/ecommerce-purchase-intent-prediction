@@ -1,2 +1,2 @@
-model,precision,recall,f1_score,roc_auc,training_time_seconds,prediction_time_seconds,epochs,batch_size,gru_units,embedding_dim,attention
-GRU_Attention,0.11832212109220419,0.3619854721549637,0.17834774828511782,0.6464364465715112,261.047036999953,2.3223663000389934,3,64,32,32,Keras_Attention
+model,evaluation_split,threshold,precision,recall,f1_score,roc_auc,pr_auc,training_time_seconds,prediction_time_seconds,epochs,batch_size,gru_units,embedding_dim,attention_type
+GRU + Attention,temporal_test,0.5,0.14852263927945553,0.4895291826180402,0.22790050497944123,0.7399592791631102,0.1604228859311853,584.183646999998,77.4734970999416,3,64,32,32,Keras Attention

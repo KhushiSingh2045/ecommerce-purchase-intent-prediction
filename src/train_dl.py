@@ -1,7 +1,29 @@
+"""
+Train LSTM on the YOOCHOOSE temporal split.
+
+Training:
+    data/processed/yoochoose_balanced_train.npz
+
+Important:
+    - Training data is balanced.
+    - Validation data is NOT balanced.
+    - Test data is NOT balanced.
+    - No class weights are used.
+    - No random train/validation/test split is performed here.
+    - Vocabulary size comes from the training vocabulary metadata.
+"""
+
+from __future__ import annotations
+
 import os
 import random
 import time
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
+import tensorflow as tf
+
 from sklearn.metrics import (
     classification_report,
     confusion_matrix,
@@ -9,35 +31,39 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
     roc_auc_score,
+    average_precision_score,
 )
-import tensorflow as tf
+
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
-DATA_FILE = "data/processed/yoochoose_balanced_train.npz"
-
-MODEL_DIR = "models/deep_learning"
-RESULTS_DIR = "results/metrics"
-FIGURES_DIR = "results/figures"
-
-MODEL_FILE = os.path.join(MODEL_DIR, "lstm_model.keras")
-METRICS_FILE = os.path.join(RESULTS_DIR, "lstm_metrics.csv")
-HISTORY_FILE = os.path.join(FIGURES_DIR, "lstm_training_history.png")
 
 RANDOM_SEED = 42
 
-# Resource-conscious settings
+DATA_FILE = Path(
+    "data/processed/yoochoose_balanced_train.npz"
+)
+
+MODEL_FILE = Path(
+    "models/deep_learning/lstm_model.keras"
+)
+
+METRICS_FILE = Path(
+    "results/metrics/lstm_metrics.csv"
+)
+
+HISTORY_FILE = Path(
+    "results/figures/lstm_training_history.png"
+)
+
 BATCH_SIZE = 64
 EPOCHS = 10
+PATIENCE = 2
+
 LSTM_UNITS = 32
 EMBEDDING_DIM = 32
-
-# Sequence length is determined from the dataset
-MAX_SEQUENCE_LENGTH = 20
-
-# Training controls
-PATIENCE = 2
+DROPOUT = 0.30
 
 
 # ============================================================
@@ -50,339 +76,573 @@ random.seed(RANDOM_SEED)
 np.random.seed(RANDOM_SEED)
 tf.random.set_seed(RANDOM_SEED)
 
-# Avoid TensorFlow using excessive CPU threads
-tf.config.threading.set_intra_op_parallelism_threads(4)
-tf.config.threading.set_inter_op_parallelism_threads(2)
+try:
+    tf.config.threading.set_intra_op_parallelism_threads(4)
+    tf.config.threading.set_inter_op_parallelism_threads(2)
+except RuntimeError:
+    pass
 
 
 # ============================================================
-# CREATE OUTPUT DIRECTORIES
+# DIRECTORIES
 # ============================================================
 
-os.makedirs(MODEL_DIR, exist_ok=True)
-os.makedirs(RESULTS_DIR, exist_ok=True)
-os.makedirs(FIGURES_DIR, exist_ok=True)
+MODEL_FILE.parent.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+METRICS_FILE.parent.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+HISTORY_FILE.parent.mkdir(
+    parents=True,
+    exist_ok=True,
+)
 
 
 # ============================================================
-# START
+# DATA LOADING
 # ============================================================
 
-print("=" * 60)
-print("YOOCHOOSE LSTM TRAINING (BALANCED TRAINING SET)")
-print("=" * 60)
+def load_dataset():
+    if not DATA_FILE.exists():
+        raise FileNotFoundError(
+            f"""
+Balanced dataset not found:
 
-print("\nLoading dataset:")
-print(DATA_FILE)
+{DATA_FILE}
 
+Run:
 
-# ============================================================
-# LOAD PREPARED DATASET
-# ============================================================
+python -m src.feature_engineering
+python -m src.balance_dataset
+"""
+        )
 
-if not os.path.exists(DATA_FILE):
-    raise FileNotFoundError(
-        f"\nDataset not found:\n{DATA_FILE}\n\n"
-        "Run this command first:\n"
-        "python -m src.balance_dataset"
+    data = np.load(
+        DATA_FILE,
+        allow_pickle=True,
     )
 
-data = np.load(DATA_FILE)
+    required = [
+        "train_sequences",
+        "train_labels",
+        "val_sequences",
+        "val_labels",
+        "test_sequences",
+        "test_labels",
+        "vocabulary_codes",
+    ]
 
-required_keys = [
-    "train_sequences",
-    "train_labels",
-    "val_sequences",
-    "val_labels",
-    "test_sequences",
-    "test_labels",
-]
+    missing = [
+        key
+        for key in required
+        if key not in data.files
+    ]
 
-for key in required_keys:
-    if key not in data:
-        raise KeyError(f"Required dataset field '{key}' is missing.")
+    if missing:
+        raise KeyError(
+            "Required arrays missing from dataset: "
+            + ", ".join(missing)
+        )
 
-
-# ============================================================
-# EXTRACT DATA
-# ============================================================
-
-X_train = data["train_sequences"]
-y_train = data["train_labels"]
-
-X_val = data["val_sequences"]
-y_val = data["val_labels"]
-
-X_test = data["test_sequences"]
-y_test = data["test_labels"]
+    return data
 
 
 # ============================================================
-# DATASET INFORMATION
+# DATA VALIDATION
 # ============================================================
 
-print("\nDataset information:")
+def validate_dataset(data) -> None:
 
-print(f"Training sequences   : {X_train.shape}")
-print(f"Validation sequences : {X_val.shape}")
-print(f"Test sequences       : {X_test.shape}")
+    X_train = data["train_sequences"]
+    y_train = data["train_labels"]
 
-print(f"\nTraining samples     : {len(y_train):,}")
-print(f"Validation samples   : {len(y_val):,}")
-print(f"Test samples         : {len(y_test):,}")
+    X_val = data["val_sequences"]
+    y_val = data["val_labels"]
 
-print(f"\nSequence length      : {X_train.shape[1]}")
-print(f"Vocabulary size      : {int(np.max(X_train)) + 1}")
+    X_test = data["test_sequences"]
+    y_test = data["test_labels"]
 
-print("\nClass distribution:")
+    # Shape checks
+    if X_train.ndim != 2:
+        raise ValueError(
+            f"Expected training sequences to be 2-D, got "
+            f"{X_train.shape}."
+        )
 
-print(
-    f"Training   -> Purchase: {np.sum(y_train == 1):,}, "
-    f"No Purchase: {np.sum(y_train == 0):,}"
-)
+    if X_val.ndim != 2 or X_test.ndim != 2:
+        raise ValueError(
+            "Validation/test sequences must be 2-D."
+        )
 
-print(
-    f"Validation -> Purchase: {np.sum(y_val == 1):,}, "
-    f"No Purchase: {np.sum(y_val == 0):,}"
-)
+    if X_train.shape[1] != X_val.shape[1]:
+        raise ValueError(
+            "Train and validation sequence lengths differ."
+        )
 
-print(
-    f"Test       -> Purchase: {np.sum(y_test == 1):,}, "
-    f"No Purchase: {np.sum(y_test == 0):,}"
-)
+    if X_train.shape[1] != X_test.shape[1]:
+        raise ValueError(
+            "Train and test sequence lengths differ."
+        )
 
+    # Alignment
+    if len(X_train) != len(y_train):
+        raise ValueError(
+            "Training sequence/label count mismatch."
+        )
 
-# ============================================================
-# DETERMINE VOCABULARY SIZE
-# ============================================================
+    if len(X_val) != len(y_val):
+        raise ValueError(
+            "Validation sequence/label count mismatch."
+        )
 
-vocab_size = (
-    int(max(np.max(X_train), np.max(X_val), np.max(X_test))) + 1
-)
+    if len(X_test) != len(y_test):
+        raise ValueError(
+            "Test sequence/label count mismatch."
+        )
 
-sequence_length = X_train.shape[1]
+    # Binary labels
+    for name, labels in [
+        ("train", y_train),
+        ("validation", y_val),
+        ("test", y_test),
+    ]:
+        unique = np.unique(labels)
 
-print("\nModel configuration:")
-print(f"Vocabulary size : {vocab_size:,}")
-print(f"Sequence length : {sequence_length}")
-print(f"Embedding dim   : {EMBEDDING_DIM}")
-print(f"LSTM units      : {LSTM_UNITS}")
-print(f"Batch size      : {BATCH_SIZE}")
-print(f"Maximum epochs  : {EPOCHS}")
+        if not np.all(
+            np.isin(unique, [0, 1])
+        ):
+            raise ValueError(
+                f"{name} labels are not binary: {unique}"
+            )
 
+    # Balanced training check
+    train_positive = np.sum(y_train == 1)
+    train_negative = np.sum(y_train == 0)
 
-# ============================================================
-# BUILD LSTM MODEL
-# ============================================================
+    if train_positive != train_negative:
+        raise ValueError(
+            "Training data is expected to be exactly 50:50, "
+            f"but got positive={train_positive:,}, "
+            f"negative={train_negative:,}."
+        )
 
-print("\n" + "-" * 60)
-print("Building LSTM model...")
-print("-" * 60)
-
-model = tf.keras.Sequential([
-    tf.keras.layers.Input(shape=(sequence_length,)),
-    tf.keras.layers.Embedding(
-        input_dim=vocab_size,
-        output_dim=EMBEDDING_DIM,
-        mask_zero=True,
-    ),
-    tf.keras.layers.LSTM(LSTM_UNITS),
-    tf.keras.layers.Dropout(0.30),
-    tf.keras.layers.Dense(1, activation="sigmoid"),
-])
-
-
-# ============================================================
-# COMPILE MODEL
-# ============================================================
-
-model.compile(
-    optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-    loss="binary_crossentropy",
-    metrics=[
-        tf.keras.metrics.Precision(name="precision"),
-        tf.keras.metrics.Recall(name="recall"),
-    ],
-)
-
-print("\nModel summary:")
-model.summary()
+    # Natural validation/test distribution is intentional.
+    print(
+        "\nTraining balance check: "
+        f"{train_positive:,} positive / "
+        f"{train_negative:,} negative"
+    )
 
 
 # ============================================================
-# EARLY STOPPING
+# VOCABULARY
 # ============================================================
 
-early_stopping = tf.keras.callbacks.EarlyStopping(
-    monitor="val_loss", patience=PATIENCE, restore_best_weights=True
-)
+def get_vocabulary_size(data) -> int:
 
+    vocabulary_codes = np.asarray(
+        data["vocabulary_codes"]
+    )
 
-# ============================================================
-# TRAIN
-# ============================================================
+    if vocabulary_codes.size == 0:
+        raise ValueError(
+            "Training vocabulary is empty."
+        )
 
-print("\n" + "=" * 60)
-print("STARTING LSTM TRAINING")
-print("=" * 60)
+    max_code = int(
+        vocabulary_codes.max()
+    )
 
-start_time = time.time()
-
-# Balanced training set: class_weight is no longer used
-history = model.fit(
-    X_train,
-    y_train,
-    validation_data=(X_val, y_val),
-    epochs=EPOCHS,
-    batch_size=BATCH_SIZE,
-    callbacks=[early_stopping],
-    verbose=1,
-)
-
-training_time = time.time() - start_time
-
-print("\n" + "=" * 60)
-print("TRAINING COMPLETED")
-print("=" * 60)
-
-print(f"\nTraining time: {training_time / 60:.2f} minutes")
-print(f"Epochs completed: {len(history.history['loss'])}")
+    # 0 = PAD
+    # 1 = UNK
+    # max training code = max_code
+    return max_code + 1
 
 
 # ============================================================
-# PREDICTIONS
+# MODEL
 # ============================================================
 
-print("\nGenerating test predictions...")
+def build_model(
+    vocabulary_size: int,
+    sequence_length: int,
+) -> tf.keras.Model:
 
-prediction_start = time.time()
+    model = tf.keras.Sequential(
+        [
+            tf.keras.layers.Input(
+                shape=(sequence_length,)
+            ),
 
-y_probability = model.predict(
-    X_test, batch_size=BATCH_SIZE, verbose=0
-).ravel()
+            tf.keras.layers.Embedding(
+                input_dim=vocabulary_size,
+                output_dim=EMBEDDING_DIM,
+                mask_zero=True,
+                name="item_embedding",
+            ),
 
-prediction_time = time.time() - prediction_start
+            tf.keras.layers.LSTM(
+                LSTM_UNITS,
+                name="lstm",
+            ),
 
-y_prediction = (y_probability >= 0.50).astype(np.int8)
+            tf.keras.layers.Dropout(
+                DROPOUT
+            ),
+
+            tf.keras.layers.Dense(
+                1,
+                activation="sigmoid",
+                name="purchase_probability",
+            ),
+        ]
+    )
+
+    model.compile(
+        optimizer=tf.keras.optimizers.Adam(
+            learning_rate=0.001
+        ),
+        loss="binary_crossentropy",
+        metrics=[
+            tf.keras.metrics.Precision(
+                name="precision"
+            ),
+            tf.keras.metrics.Recall(
+                name="recall"
+            ),
+        ],
+    )
+
+    return model
 
 
 # ============================================================
-# EVALUATION
+# MAIN
 # ============================================================
 
-precision = precision_score(y_test, y_prediction, zero_division=0)
-recall = recall_score(y_test, y_prediction, zero_division=0)
-f1 = f1_score(y_test, y_prediction, zero_division=0)
-roc_auc = roc_auc_score(y_test, y_probability)
-cm = confusion_matrix(y_test, y_prediction)
+def main():
 
+    print("=" * 70)
+    print("YOOCHOOSE LSTM — TEMPORAL SPLIT")
+    print("=" * 70)
 
-# ============================================================
-# DISPLAY RESULTS
-# ============================================================
+    data = load_dataset()
 
-print("\n" + "=" * 60)
-print("LSTM TEST RESULTS")
-print("=" * 60)
+    validate_dataset(data)
 
-print(f"\nPrecision : {precision:.4f}")
-print(f"Recall    : {recall:.4f}")
-print(f"F1-score  : {f1:.4f}")
-print(f"ROC-AUC   : {roc_auc:.4f}")
+    X_train = np.asarray(
+        data["train_sequences"],
+        dtype=np.int32,
+    )
 
-print("\nConfusion Matrix:")
-print(cm)
+    y_train = np.asarray(
+        data["train_labels"],
+        dtype=np.int8,
+    )
 
-print("\nClassification Report:")
-print(
-    classification_report(
+    X_val = np.asarray(
+        data["val_sequences"],
+        dtype=np.int32,
+    )
+
+    y_val = np.asarray(
+        data["val_labels"],
+        dtype=np.int8,
+    )
+
+    X_test = np.asarray(
+        data["test_sequences"],
+        dtype=np.int32,
+    )
+
+    y_test = np.asarray(
+        data["test_labels"],
+        dtype=np.int8,
+    )
+
+    vocabulary_size = get_vocabulary_size(
+        data
+    )
+
+    sequence_length = X_train.shape[1]
+
+    print("\nDataset:")
+    print(
+        f"Train      : {X_train.shape}"
+    )
+    print(
+        f"Validation : {X_val.shape}"
+    )
+    print(
+        f"Test       : {X_test.shape}"
+    )
+
+    print(
+        f"\nVocabulary size : {vocabulary_size:,}"
+    )
+
+    print(
+        f"Sequence length : {sequence_length}"
+    )
+
+    print(
+        f"Training purchase rate: "
+        f"{np.mean(y_train) * 100:.2f}%"
+    )
+
+    print(
+        f"Validation purchase rate: "
+        f"{np.mean(y_val) * 100:.2f}%"
+    )
+
+    print(
+        f"Test purchase rate: "
+        f"{np.mean(y_test) * 100:.2f}%"
+    )
+
+    # --------------------------------------------------------
+    # Build
+    # --------------------------------------------------------
+
+    print("\nBuilding LSTM...")
+
+    model = build_model(
+        vocabulary_size,
+        sequence_length,
+    )
+
+    model.summary()
+
+    # --------------------------------------------------------
+    # Early stopping
+    # --------------------------------------------------------
+
+    early_stopping = tf.keras.callbacks.EarlyStopping(
+        monitor="val_loss",
+        patience=PATIENCE,
+        restore_best_weights=True,
+    )
+
+    # --------------------------------------------------------
+    # Train
+    # --------------------------------------------------------
+
+    print("\n" + "=" * 70)
+    print("TRAINING")
+    print("=" * 70)
+
+    start = time.perf_counter()
+
+    history = model.fit(
+        X_train,
+        y_train,
+        validation_data=(
+            X_val,
+            y_val,
+        ),
+        epochs=EPOCHS,
+        batch_size=BATCH_SIZE,
+        callbacks=[early_stopping],
+        verbose=1,
+    )
+
+    training_time = (
+        time.perf_counter() - start
+    )
+
+    print(
+        f"\nTraining time: "
+        f"{training_time:.2f} seconds"
+    )
+
+    # --------------------------------------------------------
+    # Test
+    # --------------------------------------------------------
+
+    print("\n" + "=" * 70)
+    print("TEMPORAL TEST EVALUATION")
+    print("=" * 70)
+
+    start = time.perf_counter()
+
+    probabilities = model.predict(
+        X_test,
+        batch_size=BATCH_SIZE,
+        verbose=0,
+    ).ravel()
+
+    prediction_time = (
+        time.perf_counter() - start
+    )
+
+    predictions = (
+        probabilities >= 0.50
+    ).astype(np.int8)
+
+    precision = precision_score(
         y_test,
-        y_prediction,
-        target_names=["No Purchase", "Purchase"],
+        predictions,
         zero_division=0,
     )
-)
 
-
-# ============================================================
-# SAVE MODEL
-# ============================================================
-
-model.save(MODEL_FILE)
-
-print("\nSaved LSTM model:")
-print(MODEL_FILE)
-
-
-# ============================================================
-# SAVE METRICS
-# ============================================================
-
-with open(METRICS_FILE, "w") as f:
-    f.write(
-        "model,precision,recall,f1_score,roc_auc,"
-        "training_time_seconds,prediction_time_seconds,"
-        "epochs,batch_size,lstm_units\n"
+    recall = recall_score(
+        y_test,
+        predictions,
+        zero_division=0,
     )
 
-    f.write(
-        f"LSTM,"
-        f"{precision:.6f},"
-        f"{recall:.6f},"
-        f"{f1:.6f},"
-        f"{roc_auc:.6f},"
-        f"{training_time:.2f},"
-        f"{prediction_time:.2f},"
-        f"{len(history.history['loss'])},"
-        f"{BATCH_SIZE},"
-        f"{LSTM_UNITS}\n"
+    f1 = f1_score(
+        y_test,
+        predictions,
+        zero_division=0,
     )
 
-print("\nSaved metrics:")
-print(METRICS_FILE)
+    roc_auc = roc_auc_score(
+        y_test,
+        probabilities,
+    )
 
+    pr_auc = average_precision_score(
+        y_test,
+        probabilities,
+    )
 
-# ============================================================
-# SAVE TRAINING HISTORY FIGURE
-# ============================================================
+    cm = confusion_matrix(
+        y_test,
+        predictions,
+    )
 
-try:
+    print(
+        f"\nPrecision : {precision:.4f}"
+    )
+
+    print(
+        f"Recall    : {recall:.4f}"
+    )
+
+    print(
+        f"F1        : {f1:.4f}"
+    )
+
+    print(
+        f"ROC-AUC   : {roc_auc:.4f}"
+    )
+
+    print(
+        f"PR-AUC    : {pr_auc:.4f}"
+    )
+
+    print("\nConfusion matrix:")
+    print(cm)
+
+    print("\nClassification report:")
+    print(
+        classification_report(
+            y_test,
+            predictions,
+            target_names=[
+                "No Purchase",
+                "Purchase",
+            ],
+            zero_division=0,
+        )
+    )
+
+    # --------------------------------------------------------
+    # Save model
+    # --------------------------------------------------------
+
+    model.save(
+        MODEL_FILE
+    )
+
+    # --------------------------------------------------------
+    # Save metrics
+    # --------------------------------------------------------
+
+    metrics = pd.DataFrame(
+        [
+            {
+                "model": "LSTM",
+                "evaluation_split": "temporal_test",
+                "threshold": 0.50,
+                "precision": precision,
+                "recall": recall,
+                "f1_score": f1,
+                "roc_auc": roc_auc,
+                "pr_auc": pr_auc,
+                "training_time_seconds":
+                    training_time,
+                "prediction_time_seconds":
+                    prediction_time,
+                "epochs":
+                    len(
+                        history.history["loss"]
+                    ),
+                "batch_size":
+                    BATCH_SIZE,
+                "lstm_units":
+                    LSTM_UNITS,
+                "embedding_dim":
+                    EMBEDDING_DIM,
+            }
+        ]
+    )
+
+    metrics.to_csv(
+        METRICS_FILE,
+        index=False,
+    )
+
+    # --------------------------------------------------------
+    # Training figure
+    # --------------------------------------------------------
+
     import matplotlib.pyplot as plt
 
-    plt.figure(figsize=(8, 5))
+    plt.figure(
+        figsize=(8, 5)
+    )
 
-    plt.plot(history.history["loss"], label="Training Loss")
-    plt.plot(history.history["val_loss"], label="Validation Loss")
+    plt.plot(
+        history.history["loss"],
+        label="Training Loss",
+    )
+
+    plt.plot(
+        history.history["val_loss"],
+        label="Validation Loss",
+    )
 
     plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.title("LSTM Training and Validation Loss (Balanced Training Set)")
+    plt.ylabel("Binary Cross-Entropy")
+    plt.title(
+        "LSTM Training and Validation Loss"
+    )
+
     plt.legend()
     plt.tight_layout()
 
-    plt.savefig(HISTORY_FILE, dpi=150)
+    plt.savefig(
+        HISTORY_FILE,
+        dpi=300,
+        bbox_inches="tight",
+    )
+
     plt.close()
 
-    print("\nSaved training figure:")
+    print("\nSaved:")
+    print(MODEL_FILE)
+    print(METRICS_FILE)
     print(HISTORY_FILE)
 
-except Exception as e:
-    print("\nTraining figure could not be saved:")
-    print(e)
+    print("\nLSTM experiment completed.")
 
 
-# ============================================================
-# FINAL SUMMARY
-# ============================================================
-
-print("\n" + "=" * 60)
-print("LSTM EXPERIMENT FINISHED")
-print("=" * 60)
-
-print("\nFiles generated:")
-print(f"Model   : {MODEL_FILE}")
-print(f"Metrics : {METRICS_FILE}")
-print(f"Figure  : {HISTORY_FILE}")
-
-print("\nNext model:")
-print("GRU")
+if __name__ == "__main__":
+    main()

@@ -1,423 +1,270 @@
-import os
+"""
+Early Purchase-Intent Prediction Analysis
+Evaluates predictive performance at prefix milestones: 20%, 40%, 60%, 80%, and 100% of sessions.
+Uses the true test distribution from yoochoose_balanced_train.npz.
+"""
+
+from pathlib import Path
 import time
+import lightgbm as lgb
 import numpy as np
 import pandas as pd
-
-from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score
+from sklearn.metrics import (
+    average_precision_score,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
 import tensorflow as tf
 import xgboost as xgb
-import lightgbm as lgb
 
-
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
-DATA_PATH = "data/processed/yoochoose_dl_subset.npz"
-
-LSTM_MODEL_PATH = "models/deep_learning/lstm_model.keras"
-GRU_MODEL_PATH = "models/deep_learning/gru_model.keras"
-ATTENTION_MODEL_PATH = "models/deep_learning/gru_attention_model.keras"
-
-XGB_MODEL_PATH = "models/machine_learning/xgboost_model.json"
-LGBM_MODEL_PATH = "models/machine_learning/lightgbm_model.txt"
-
-OUTPUT_PATH = "results/metrics/early_prediction_metrics.csv"
-
-SEQUENCE_LENGTH = 20
-
-# Percentages of the session used for prediction
-PERCENTAGES = [20, 40, 60, 80, 100]
-
-
-# ============================================================
-# CREATE OUTPUT DIRECTORY
-# ============================================================
-
-os.makedirs("results/metrics", exist_ok=True)
-
-
-# ============================================================
-# LOAD DATA
-# ============================================================
-
-print("=" * 60)
-print("EARLY PURCHASE-INTENT PREDICTION")
-print("=" * 60)
-
-print("\nLoading dataset...")
-
-data = np.load(DATA_PATH, allow_pickle=True)
-
-test_sequences = data["test_sequences"]
-test_time_deltas = data["test_time_deltas"]
-test_labels = data["test_labels"]
-
-print("Test sequences :", test_sequences.shape)
-print("Test labels    :", test_labels.shape)
-
-
-# ============================================================
-# AGGREGATED FEATURES
-# SAME 14 FEATURES USED BY XGBOOST/LIGHTGBM
-# ============================================================
-
-def create_features(sequences, time_deltas):
-
-    features = []
-
-    for seq, times in zip(sequences, time_deltas):
-
-        seq = np.asarray(seq)
-        times = np.asarray(times)
-
-        nonzero_items = seq[seq > 0]
-
-        if len(nonzero_items) == 0:
-            nonzero_items = np.array([0])
-
-        interaction_count = len(nonzero_items)
-        unique_item_count = len(np.unique(nonzero_items))
-        repeated_item_count = interaction_count - unique_item_count
-
-        first_item_id = nonzero_items[0]
-        last_item_id = nonzero_items[-1]
-
-        mean_item_id = np.mean(nonzero_items)
-        std_item_id = np.std(nonzero_items)
-        min_item_id = np.min(nonzero_items)
-        max_item_id = np.max(nonzero_items)
-
-        total_time_delta = np.sum(times)
-        mean_time_delta = np.mean(times)
-        max_time_delta = np.max(times)
-        std_time_delta = np.std(times)
-        nonzero_time_intervals = np.sum(times > 0)
-
-        features.append([
-            interaction_count,
-            unique_item_count,
-            repeated_item_count,
-            first_item_id,
-            last_item_id,
-            mean_item_id,
-            std_item_id,
-            min_item_id,
-            max_item_id,
-            total_time_delta,
-            mean_time_delta,
-            max_time_delta,
-            std_time_delta,
-            nonzero_time_intervals
-        ])
-
-    return np.asarray(features, dtype=np.float32)
-
-
-# ============================================================
-# EVALUATION FUNCTION
-# ============================================================
-
-def evaluate_predictions(y_true, probabilities):
-
-    predictions = (probabilities >= 0.5).astype(int)
-
-    precision = precision_score(
-        y_true,
-        predictions,
-        zero_division=0
-    )
-
-    recall = recall_score(
-        y_true,
-        predictions,
-        zero_division=0
-    )
-
-    f1 = f1_score(
-        y_true,
-        predictions,
-        zero_division=0
-    )
-
-    roc_auc = roc_auc_score(
-        y_true,
-        probabilities
-    )
-
-    return precision, recall, f1, roc_auc
-
-
-# ============================================================
-# LOAD MODELS
-# ============================================================
-
-print("\nLoading trained models...")
-
-lstm_model = tf.keras.models.load_model(LSTM_MODEL_PATH)
-gru_model = tf.keras.models.load_model(GRU_MODEL_PATH)
-attention_model = tf.keras.models.load_model(ATTENTION_MODEL_PATH)
-
-xgb_model = xgb.XGBClassifier()
-xgb_model.load_model(XGB_MODEL_PATH)
-
-lgbm_model = lgb.Booster(model_file=LGBM_MODEL_PATH)
-
-print("All models loaded successfully.")
-
-
-# ============================================================
-# EARLY PREDICTION EXPERIMENT
-# ============================================================
-
-results = []
-
-
-for percentage in PERCENTAGES:
-
-    number_of_events = max(
-        1,
-        int(SEQUENCE_LENGTH * percentage / 100)
-    )
-
-    print("\n" + "-" * 60)
-    print(
-        f"Using first {percentage}% "
-        f"({number_of_events}/{SEQUENCE_LENGTH} events)"
-    )
-    print("-" * 60)
-
-    partial_sequences = test_sequences.copy()
-    partial_times = test_time_deltas.copy()
-
-    # Keep only the first part of each session
-    partial_sequences[:, number_of_events:] = 0
-    partial_times[:, number_of_events:] = 0
-
-    # --------------------------------------------------------
-    # LSTM
-    # --------------------------------------------------------
-
-    start = time.perf_counter()
-
-    lstm_prob = lstm_model.predict(
-        partial_sequences,
-        verbose=0
-    ).ravel()
-
-    lstm_time = time.perf_counter() - start
-
-    precision, recall, f1, auc = evaluate_predictions(
-        test_labels,
-        lstm_prob
-    )
-
-    results.append([
-        "LSTM",
-        percentage,
-        precision,
-        recall,
-        f1,
-        auc,
-        lstm_time
-    ])
-
-    print(
-        f"LSTM           "
-        f"Precision={precision:.4f} "
-        f"Recall={recall:.4f} "
-        f"F1={f1:.4f} "
-        f"ROC-AUC={auc:.4f}"
-    )
-
-
-    # --------------------------------------------------------
-    # GRU
-    # --------------------------------------------------------
-
-    start = time.perf_counter()
-
-    gru_prob = gru_model.predict(
-        partial_sequences,
-        verbose=0
-    ).ravel()
-
-    gru_time = time.perf_counter() - start
-
-    precision, recall, f1, auc = evaluate_predictions(
-        test_labels,
-        gru_prob
-    )
-
-    results.append([
-        "GRU",
-        percentage,
-        precision,
-        recall,
-        f1,
-        auc,
-        gru_time
-    ])
-
-    print(
-        f"GRU            "
-        f"Precision={precision:.4f} "
-        f"Recall={recall:.4f} "
-        f"F1={f1:.4f} "
-        f"ROC-AUC={auc:.4f}"
-    )
-
-
-    # --------------------------------------------------------
-    # GRU + ATTENTION
-    # --------------------------------------------------------
-
-    start = time.perf_counter()
-
-    attention_prob = attention_model.predict(
-        partial_sequences,
-        verbose=0
-    ).ravel()
-
-    attention_time = time.perf_counter() - start
-
-    precision, recall, f1, auc = evaluate_predictions(
-        test_labels,
-        attention_prob
-    )
-
-    results.append([
-        "GRU + Attention",
-        percentage,
-        precision,
-        recall,
-        f1,
-        auc,
-        attention_time
-    ])
-
-    print(
-        f"GRU + Attention "
-        f"Precision={precision:.4f} "
-        f"Recall={recall:.4f} "
-        f"F1={f1:.4f} "
-        f"ROC-AUC={auc:.4f}"
-    )
-
-
-    # --------------------------------------------------------
-    # XGBOOST
-    # --------------------------------------------------------
-
-    xgb_features = create_features(
-        partial_sequences,
-        partial_times
-    )
-
-    start = time.perf_counter()
-
-    xgb_prob = xgb_model.predict_proba(
-        xgb_features
-    )[:, 1]
-
-    xgb_time = time.perf_counter() - start
-
-    precision, recall, f1, auc = evaluate_predictions(
-        test_labels,
-        xgb_prob
-    )
-
-    results.append([
-        "XGBoost",
-        percentage,
-        precision,
-        recall,
-        f1,
-        auc,
-        xgb_time
-    ])
-
-    print(
-        f"XGBoost        "
-        f"Precision={precision:.4f} "
-        f"Recall={recall:.4f} "
-        f"F1={f1:.4f} "
-        f"ROC-AUC={auc:.4f}"
-    )
-
-
-    # --------------------------------------------------------
-    # LIGHTGBM
-    # --------------------------------------------------------
-
-    lgb_features = create_features(
-        partial_sequences,
-        partial_times
-    )
-
-    start = time.perf_counter()
-
-    lgb_prob = lgbm_model.predict(
-        lgb_features
-    )
-
-    lgb_time = time.perf_counter() - start
-
-    precision, recall, f1, auc = evaluate_predictions(
-        test_labels,
-        lgb_prob
-    )
-
-    results.append([
-        "LightGBM",
-        percentage,
-        precision,
-        recall,
-        f1,
-        auc,
-        lgb_time
-    ])
-
-    print(
-        f"LightGBM       "
-        f"Precision={precision:.4f} "
-        f"Recall={recall:.4f} "
-        f"F1={f1:.4f} "
-        f"ROC-AUC={auc:.4f}"
-    )
-
-
-# ============================================================
-# SAVE RESULTS
-# ============================================================
-
-columns = [
-    "model",
-    "session_percentage",
-    "precision",
-    "recall",
-    "f1_score",
-    "roc_auc",
-    "prediction_time_seconds"
+# =============================================================================
+# PATHS
+# =============================================================================
+
+BASE_DIR = Path(__file__).resolve().parents[1]
+DATA_PATH = BASE_DIR / "data" / "processed" / "yoochoose_balanced_train.npz"
+MODELS_DIR = BASE_DIR / "models"
+METRICS_DIR = BASE_DIR / "results" / "metrics"
+METRICS_DIR.mkdir(parents=True, exist_ok=True)
+
+FEATURE_NAMES = [
+    "interaction_count",
+    "unique_item_count",
+    "repeated_item_count",
+    "first_item_id",
+    "last_item_id",
+    "mean_item_id",
+    "std_item_id",
+    "min_item_id",
+    "max_item_id",
+    "total_time_delta",
+    "mean_time_delta",
+    "max_time_delta",
+    "std_time_delta",
+    "nonzero_time_intervals",
 ]
 
-results_df = pd.DataFrame(
-    results,
-    columns=columns
-)
 
-results_df.to_csv(
-    OUTPUT_PATH,
-    index=False
-)
+# =============================================================================
+# FEATURE EXTRACTION HELPERS
+# =============================================================================
 
-print("\n" + "=" * 60)
-print("EARLY PREDICTION EXPERIMENT COMPLETED")
-print("=" * 60)
+def extract_features(sequences, time_deltas):
+    """Dynamically extracts the 14 tabular features from sequential arrays."""
+    n_sessions = sequences.shape[0]
+    features = np.zeros((n_sessions, 14), dtype=np.float32)
 
-print("\nResults:")
-print(results_df.to_string(index=False))
+    for i in range(n_sessions):
+        items = sequences[i]
+        valid_items = items[items != 0]
 
-print(
-    f"\nSaved results -> {OUTPUT_PATH}"
-)
+        if len(valid_items) == 0:
+            features[i] = 0
+            continue
+
+        deltas = time_deltas[i]
+        valid_deltas = deltas[deltas > 0]
+
+        total_time = np.sum(valid_deltas) if len(valid_deltas) > 0 else 0.0
+        mean_time = np.mean(valid_deltas) if len(valid_deltas) > 0 else 0.0
+        max_time = np.max(valid_deltas) if len(valid_deltas) > 0 else 0.0
+        std_time = np.std(valid_deltas) if len(valid_deltas) > 0 else 0.0
+
+        features[i] = [
+            len(valid_items),
+            len(np.unique(valid_items)),
+            len(valid_items) - len(np.unique(valid_items)),
+            valid_items[0],
+            valid_items[-1],
+            np.mean(valid_items),
+            np.std(valid_items),
+            np.min(valid_items),
+            np.max(valid_items),
+            total_time,
+            mean_time,
+            max_time,
+            std_time,
+            len(valid_deltas),
+        ]
+
+    return features
+
+
+def truncate_sequences(sequences, time_deltas, fraction):
+    """Truncates interaction events to simulate early in-session prediction."""
+    truncated_seq = np.zeros_like(sequences)
+    truncated_deltas = np.zeros_like(time_deltas)
+
+    for i in range(len(sequences)):
+        items = sequences[i]
+        valid_indices = np.where(items != 0)[0]
+        n_valid = len(valid_indices)
+
+        if n_valid == 0:
+            continue
+
+        keep_count = max(1, int(np.ceil(n_valid * fraction)))
+        kept_indices = valid_indices[:keep_count]
+
+        # Right-aligned padding to maintain temporal order
+        truncated_seq[i, -keep_count:] = items[kept_indices]
+        truncated_deltas[i, -keep_count:] = time_deltas[i, kept_indices]
+
+    return truncated_seq, truncated_deltas
+
+
+# =============================================================================
+# MAIN PIPELINE
+# =============================================================================
+
+def main():
+    print("=" * 60)
+    print("EARLY PURCHASE-INTENT PREDICTION (BALANCED PIPELINE)")
+    print("=" * 60)
+
+    if not DATA_PATH.exists():
+        raise FileNotFoundError(f"Required dataset not found: {DATA_PATH}")
+
+    print(f"\nLoading dataset from: {DATA_PATH}")
+    data = np.load(DATA_PATH, allow_pickle=True)
+    test_seq = data["test_sequences"]
+    test_deltas = data["test_time_deltas"]
+    y_test = data["test_labels"]
+
+    print(f"Test sequences : {test_seq.shape}")
+    print(f"Test labels    : {y_test.shape}")
+
+    # Load All 5 Models
+    print("\nLoading trained model artifacts...")
+    xgb_model = xgb.Booster()
+    xgb_model.load_model(str(MODELS_DIR / "machine_learning" / "xgboost_model.json"))
+
+    lgb_model = lgb.Booster(
+        model_file=str(MODELS_DIR / "machine_learning" / "lightgbm_model.txt")
+    )
+
+    lstm_model = tf.keras.models.load_model(
+        MODELS_DIR / "deep_learning" / "lstm_model.keras", compile=False
+    )
+    gru_model = tf.keras.models.load_model(
+        MODELS_DIR / "deep_learning" / "gru_model.keras", compile=False
+    )
+    attention_model = tf.keras.models.load_model(
+        MODELS_DIR / "deep_learning" / "gru_attention_model.keras",
+        compile=False,
+    )
+    print("All 5 models loaded successfully.")
+
+    fractions = [0.20, 0.40, 0.60, 0.80, 1.00]
+    results = []
+
+    for frac in fractions:
+        pct = int(frac * 100)
+        n_events = int(round(frac * 20))
+        print(f"\n{'-' * 60}")
+        print(f"Using first {pct}% ({n_events}/20 events)")
+        print(f"{'-' * 60}")
+
+        sub_seq, sub_deltas = truncate_sequences(test_seq, test_deltas, frac)
+        sub_tabular = extract_features(sub_seq, sub_deltas)
+
+        # 1. LSTM
+        t0 = time.perf_counter()
+        prob_lstm = lstm_model.predict(sub_seq, verbose=0).flatten()
+        lat_lstm = time.perf_counter() - t0
+        pred_lstm = (prob_lstm >= 0.50).astype(int)
+
+        results.append({
+            "model": "LSTM",
+            "session_percentage": pct,
+            "precision": float(precision_score(y_test, pred_lstm, zero_division=0)),
+            "recall": float(recall_score(y_test, pred_lstm, zero_division=0)),
+            "f1_score": float(f1_score(y_test, pred_lstm, zero_division=0)),
+            "roc_auc": float(roc_auc_score(y_test, prob_lstm)),
+            "prediction_time_seconds": lat_lstm,
+        })
+        print(f"LSTM            Precision={results[-1]['precision']:.4f} Recall={results[-1]['recall']:.4f} F1={results[-1]['f1_score']:.4f} ROC-AUC={results[-1]['roc_auc']:.4f}")
+
+        # 2. GRU
+        t0 = time.perf_counter()
+        prob_gru = gru_model.predict(sub_seq, verbose=0).flatten()
+        lat_gru = time.perf_counter() - t0
+        pred_gru = (prob_gru >= 0.50).astype(int)
+
+        results.append({
+            "model": "GRU",
+            "session_percentage": pct,
+            "precision": float(precision_score(y_test, pred_gru, zero_division=0)),
+            "recall": float(recall_score(y_test, pred_gru, zero_division=0)),
+            "f1_score": float(f1_score(y_test, pred_gru, zero_division=0)),
+            "roc_auc": float(roc_auc_score(y_test, prob_gru)),
+            "prediction_time_seconds": lat_gru,
+        })
+        print(f"GRU             Precision={results[-1]['precision']:.4f} Recall={results[-1]['recall']:.4f} F1={results[-1]['f1_score']:.4f} ROC-AUC={results[-1]['roc_auc']:.4f}")
+
+        # 3. GRU + Attention
+        t0 = time.perf_counter()
+        prob_att = attention_model.predict(sub_seq, verbose=0).flatten()
+        lat_att = time.perf_counter() - t0
+        pred_att = (prob_att >= 0.50).astype(int)
+
+        results.append({
+            "model": "GRU + Attention",
+            "session_percentage": pct,
+            "precision": float(precision_score(y_test, pred_att, zero_division=0)),
+            "recall": float(recall_score(y_test, pred_att, zero_division=0)),
+            "f1_score": float(f1_score(y_test, pred_att, zero_division=0)),
+            "roc_auc": float(roc_auc_score(y_test, prob_att)),
+            "prediction_time_seconds": lat_att,
+        })
+        print(f"GRU + Attention Precision={results[-1]['precision']:.4f} Recall={results[-1]['recall']:.4f} F1={results[-1]['f1_score']:.4f} ROC-AUC={results[-1]['roc_auc']:.4f}")
+
+        # 4. XGBoost
+        t0 = time.perf_counter()
+        dmatrix = xgb.DMatrix(sub_tabular, feature_names=FEATURE_NAMES)
+        prob_xgb = xgb_model.predict(dmatrix)
+        lat_xgb = time.perf_counter() - t0
+        pred_xgb = (prob_xgb >= 0.64).astype(int)
+
+        results.append({
+            "model": "XGBoost",
+            "session_percentage": pct,
+            "precision": float(precision_score(y_test, pred_xgb, zero_division=0)),
+            "recall": float(recall_score(y_test, pred_xgb, zero_division=0)),
+            "f1_score": float(f1_score(y_test, pred_xgb, zero_division=0)),
+            "roc_auc": float(roc_auc_score(y_test, prob_xgb)),
+            "prediction_time_seconds": lat_xgb,
+        })
+        print(f"XGBoost         Precision={results[-1]['precision']:.4f} Recall={results[-1]['recall']:.4f} F1={results[-1]['f1_score']:.4f} ROC-AUC={results[-1]['roc_auc']:.4f}")
+
+        # 5. LightGBM
+        t0 = time.perf_counter()
+        prob_lgb = lgb_model.predict(sub_tabular)
+        lat_lgb = time.perf_counter() - t0
+        pred_lgb = (prob_lgb >= 0.71).astype(int)
+
+        results.append({
+            "model": "LightGBM",
+            "session_percentage": pct,
+            "precision": float(precision_score(y_test, pred_lgb, zero_division=0)),
+            "recall": float(recall_score(y_test, pred_lgb, zero_division=0)),
+            "f1_score": float(f1_score(y_test, pred_lgb, zero_division=0)),
+            "roc_auc": float(roc_auc_score(y_test, prob_lgb)),
+            "prediction_time_seconds": lat_lgb,
+        })
+        print(f"LightGBM        Precision={results[-1]['precision']:.4f} Recall={results[-1]['recall']:.4f} F1={results[-1]['f1_score']:.4f} ROC-AUC={results[-1]['roc_auc']:.4f}")
+
+    df_results = pd.DataFrame(results)
+    out_csv = METRICS_DIR / "early_prediction_metrics.csv"
+    df_results.to_csv(out_csv, index=False)
+
+    print(f"\n[SAVED] {out_csv}")
+    print("=" * 60)
+    print("EARLY PREDICTION EXPERIMENT COMPLETED")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()

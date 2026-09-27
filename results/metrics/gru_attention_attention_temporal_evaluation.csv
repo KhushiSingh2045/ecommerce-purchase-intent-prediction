@@ -1,0 +1,2 @@
+model,selected_threshold,validation_precision,validation_recall,validation_f1,test_precision,test_recall,test_f1,test_roc_auc,test_pr_auc,test_tn,test_fp,test_fn,test_tp,validation_prediction_time_seconds,test_prediction_time_seconds
+GRU + Attention,0.6000000000000002,0.18195877365916865,0.3739388126154243,0.24479850046860357,0.19620434843228438,0.321351333199006,0.2436473260207563,0.7399592708048318,0.16042290447844082,1215009,98006,50522,23923,142.14021629999843,262.5111646999994
