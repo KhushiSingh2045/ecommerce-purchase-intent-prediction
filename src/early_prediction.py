@@ -1,11 +1,12 @@
 """
 Early Purchase-Intent Prediction Analysis
 Evaluates predictive performance at prefix milestones: 20%, 40%, 60%, 80%, and 100% of sessions.
-Uses the true test distribution from yoochoose_balanced_train.npz.
+Uses joblib for LightGBM loading to prevent text format corruption.
 """
 
 from pathlib import Path
 import time
+import joblib
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
@@ -18,10 +19,6 @@ from sklearn.metrics import (
 )
 import tensorflow as tf
 import xgboost as xgb
-
-# =============================================================================
-# PATHS
-# =============================================================================
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 DATA_PATH = BASE_DIR / "data" / "processed" / "yoochoose_balanced_train.npz"
@@ -47,12 +44,7 @@ FEATURE_NAMES = [
 ]
 
 
-# =============================================================================
-# FEATURE EXTRACTION HELPERS
-# =============================================================================
-
 def extract_features(sequences, time_deltas):
-    """Dynamically extracts the 14 tabular features from sequential arrays."""
     n_sessions = sequences.shape[0]
     features = np.zeros((n_sessions, 14), dtype=np.float32)
 
@@ -61,7 +53,6 @@ def extract_features(sequences, time_deltas):
         valid_items = items[items != 0]
 
         if len(valid_items) == 0:
-            features[i] = 0
             continue
 
         deltas = time_deltas[i]
@@ -93,7 +84,6 @@ def extract_features(sequences, time_deltas):
 
 
 def truncate_sequences(sequences, time_deltas, fraction):
-    """Truncates interaction events to simulate early in-session prediction."""
     truncated_seq = np.zeros_like(sequences)
     truncated_deltas = np.zeros_like(time_deltas)
 
@@ -108,42 +98,36 @@ def truncate_sequences(sequences, time_deltas, fraction):
         keep_count = max(1, int(np.ceil(n_valid * fraction)))
         kept_indices = valid_indices[:keep_count]
 
-        # Right-aligned padding to maintain temporal order
         truncated_seq[i, -keep_count:] = items[kept_indices]
         truncated_deltas[i, -keep_count:] = time_deltas[i, kept_indices]
 
     return truncated_seq, truncated_deltas
 
 
-# =============================================================================
-# MAIN PIPELINE
-# =============================================================================
+def load_lightgbm_model():
+    """Robust loader trying joblib first to avoid C++ parser corruption."""
+    joblib_p = MODELS_DIR / "machine_learning" / "lightgbm.joblib"
+    txt_p = MODELS_DIR / "machine_learning" / "lightgbm_model.txt"
+
+    if joblib_p.exists():
+        return joblib.load(joblib_p)
+    return lgb.Booster(model_file=str(txt_p))
+
 
 def main():
     print("=" * 60)
-    print("EARLY PURCHASE-INTENT PREDICTION (BALANCED PIPELINE)")
+    print("EARLY PURCHASE-INTENT PREDICTION")
     print("=" * 60)
 
-    if not DATA_PATH.exists():
-        raise FileNotFoundError(f"Required dataset not found: {DATA_PATH}")
-
-    print(f"\nLoading dataset from: {DATA_PATH}")
     data = np.load(DATA_PATH, allow_pickle=True)
     test_seq = data["test_sequences"]
     test_deltas = data["test_time_deltas"]
     y_test = data["test_labels"]
 
-    print(f"Test sequences : {test_seq.shape}")
-    print(f"Test labels    : {y_test.shape}")
-
-    # Load All 5 Models
-    print("\nLoading trained model artifacts...")
+    print("\nLoading models...")
     xgb_model = xgb.Booster()
     xgb_model.load_model(str(MODELS_DIR / "machine_learning" / "xgboost_model.json"))
-
-    lgb_model = lgb.Booster(
-        model_file=str(MODELS_DIR / "machine_learning" / "lightgbm_model.txt")
-    )
+    lgb_model = load_lightgbm_model()
 
     lstm_model = tf.keras.models.load_model(
         MODELS_DIR / "deep_learning" / "lstm_model.keras", compile=False
@@ -162,11 +146,7 @@ def main():
 
     for frac in fractions:
         pct = int(frac * 100)
-        n_events = int(round(frac * 20))
-        print(f"\n{'-' * 60}")
-        print(f"Using first {pct}% ({n_events}/20 events)")
-        print(f"{'-' * 60}")
-
+        print(f"\n--- Testing at prefix stage: {pct}% ---")
         sub_seq, sub_deltas = truncate_sequences(test_seq, test_deltas, frac)
         sub_tabular = extract_features(sub_seq, sub_deltas)
 
@@ -175,7 +155,6 @@ def main():
         prob_lstm = lstm_model.predict(sub_seq, verbose=0).flatten()
         lat_lstm = time.perf_counter() - t0
         pred_lstm = (prob_lstm >= 0.50).astype(int)
-
         results.append({
             "model": "LSTM",
             "session_percentage": pct,
@@ -185,14 +164,12 @@ def main():
             "roc_auc": float(roc_auc_score(y_test, prob_lstm)),
             "prediction_time_seconds": lat_lstm,
         })
-        print(f"LSTM            Precision={results[-1]['precision']:.4f} Recall={results[-1]['recall']:.4f} F1={results[-1]['f1_score']:.4f} ROC-AUC={results[-1]['roc_auc']:.4f}")
 
         # 2. GRU
         t0 = time.perf_counter()
         prob_gru = gru_model.predict(sub_seq, verbose=0).flatten()
         lat_gru = time.perf_counter() - t0
         pred_gru = (prob_gru >= 0.50).astype(int)
-
         results.append({
             "model": "GRU",
             "session_percentage": pct,
@@ -202,14 +179,12 @@ def main():
             "roc_auc": float(roc_auc_score(y_test, prob_gru)),
             "prediction_time_seconds": lat_gru,
         })
-        print(f"GRU             Precision={results[-1]['precision']:.4f} Recall={results[-1]['recall']:.4f} F1={results[-1]['f1_score']:.4f} ROC-AUC={results[-1]['roc_auc']:.4f}")
 
         # 3. GRU + Attention
         t0 = time.perf_counter()
         prob_att = attention_model.predict(sub_seq, verbose=0).flatten()
         lat_att = time.perf_counter() - t0
         pred_att = (prob_att >= 0.50).astype(int)
-
         results.append({
             "model": "GRU + Attention",
             "session_percentage": pct,
@@ -219,7 +194,6 @@ def main():
             "roc_auc": float(roc_auc_score(y_test, prob_att)),
             "prediction_time_seconds": lat_att,
         })
-        print(f"GRU + Attention Precision={results[-1]['precision']:.4f} Recall={results[-1]['recall']:.4f} F1={results[-1]['f1_score']:.4f} ROC-AUC={results[-1]['roc_auc']:.4f}")
 
         # 4. XGBoost
         t0 = time.perf_counter()
@@ -227,7 +201,6 @@ def main():
         prob_xgb = xgb_model.predict(dmatrix)
         lat_xgb = time.perf_counter() - t0
         pred_xgb = (prob_xgb >= 0.64).astype(int)
-
         results.append({
             "model": "XGBoost",
             "session_percentage": pct,
@@ -237,14 +210,12 @@ def main():
             "roc_auc": float(roc_auc_score(y_test, prob_xgb)),
             "prediction_time_seconds": lat_xgb,
         })
-        print(f"XGBoost         Precision={results[-1]['precision']:.4f} Recall={results[-1]['recall']:.4f} F1={results[-1]['f1_score']:.4f} ROC-AUC={results[-1]['roc_auc']:.4f}")
 
         # 5. LightGBM
         t0 = time.perf_counter()
         prob_lgb = lgb_model.predict(sub_tabular)
         lat_lgb = time.perf_counter() - t0
         pred_lgb = (prob_lgb >= 0.71).astype(int)
-
         results.append({
             "model": "LightGBM",
             "session_percentage": pct,
@@ -254,15 +225,11 @@ def main():
             "roc_auc": float(roc_auc_score(y_test, prob_lgb)),
             "prediction_time_seconds": lat_lgb,
         })
-        print(f"LightGBM        Precision={results[-1]['precision']:.4f} Recall={results[-1]['recall']:.4f} F1={results[-1]['f1_score']:.4f} ROC-AUC={results[-1]['roc_auc']:.4f}")
 
     df_results = pd.DataFrame(results)
     out_csv = METRICS_DIR / "early_prediction_metrics.csv"
     df_results.to_csv(out_csv, index=False)
-
     print(f"\n[SAVED] {out_csv}")
-    print("=" * 60)
-    print("EARLY PREDICTION EXPERIMENT COMPLETED")
     print("=" * 60)
 
 
